@@ -5,10 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>방장산 식물 도감</title>
   
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <!-- React & ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
@@ -67,7 +71,9 @@
       const [result, setResult] = useState(null);
       const [error, setError] = useState(null);
       
-      // 혹시라도 실패할 경우를 대비한 수동 모드 상태
+      const [location, setLocation] = useState(null);
+      const [isLocating, setIsLocating] = useState(false);
+
       const [isManualMode, setIsManualMode] = useState(false);
       const [manualName, setManualName] = useState('');
       const [manualDesc, setManualDesc] = useState('');
@@ -78,7 +84,7 @@
       const [plants, setPlants] = useState([]);
       const [isSaving, setIsSaving] = useState(false);
       const [saveSuccess, setSaveSuccess] = useState(false);
-      const [visibleCount, setVisibleCount] = useState(10);
+      const [expandedPlantId, setExpandedPlantId] = useState(null);
 
       const [showLoginModal, setShowLoginModal] = useState(false);
       const [loginId, setLoginId] = useState('');
@@ -87,7 +93,9 @@
       const DUMMY_DOMAIN = "@plant.local"; 
       const [showImageSourceModal, setShowImageSourceModal] = useState(false);
 
-      // 플랜트넷 API 키 복구 완료!
+      // 🌟 카카오톡, 네이버 등 인앱 브라우저 감지 (카메라 차단 원인 파악)
+      const isInAppBrowser = /KAKAOTALK|NAVER|Instagram|Line|Daum/i.test(navigator.userAgent);
+
       const plantNetApiKey = "2b10Xd7k9obw7ZFJzVTET8O";
 
       useEffect(() => {
@@ -96,11 +104,7 @@
             setUser(currentUser);
           } else {
             setUser(null);
-            try { 
-              await signInAnonymously(auth); 
-            } catch (err) { 
-              console.warn("익명 로그인이 비활성화되어 있습니다. 수동 로그인이 필요합니다."); 
-            }
+            try { await signInAnonymously(auth); } catch (err) { console.warn("수동 로그인이 필요합니다."); }
           }
         });
         return () => unsubscribe();
@@ -136,6 +140,24 @@
 
       const handleLogout = async () => {
         try { await signOut(auth); await signInAnonymously(auth); } catch (err) {}
+      };
+
+      const fetchLocation = () => {
+        if ("geolocation" in navigator) {
+          setIsLocating(true);
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              setLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+              setIsLocating(false);
+            },
+            (err) => {
+              console.warn("위치 정보를 가져올 수 없습니다.", err);
+              setLocation(null);
+              setIsLocating(false);
+            },
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+          );
+        }
       };
 
       const dataURItoBlob = (dataURI) => {
@@ -177,6 +199,9 @@
           setSelectedImage(URL.createObjectURL(file));
           setResult(null); setError(null); setSaveSuccess(false);
           setIsManualMode(false); setManualName(''); setManualDesc('');
+          
+          fetchLocation();
+
           const compressedDataUrl = await compressImage(file);
           setCompressedImageUrl(compressedDataUrl);
         }
@@ -196,28 +221,22 @@
 
           const url = `https://my-api.plantnet.org/v2/identify/all?api-key=${plantNetApiKey}&lang=ko`;
 
-          const response = await fetch(url, {
-            method: 'POST',
-            body: formData
-          });
+          const response = await fetch(url, { method: 'POST', body: formData });
 
           if (response.status === 404) {
-            setError("사진에서 식물을 찾지 못했어요. (식물이 아니거나 너무 흐려요) 직접 이름을 적어볼까요?");
+            setError("사진에서 식물을 찾지 못했어요. 직접 이름을 적어볼까요?");
             setIsManualMode(true);
             setIsAnalyzing(false);
             return; 
           }
 
-          if (!response.ok) {
-            throw new Error(`서버 응답 오류 (${response.status})`);
-          }
+          if (!response.ok) throw new Error(`서버 응답 오류 (${response.status})`);
 
           const data = await response.json();
 
           if (data && data.results && data.results.length > 0) {
             const bestMatch = data.results[0];
             const accuracy = Math.round(bestMatch.score * 100);
-            
             const plantName = (bestMatch.species.commonNames && bestMatch.species.commonNames.length > 0) 
                               ? bestMatch.species.commonNames[0] 
                               : bestMatch.species.scientificNameWithoutAuthor;
@@ -231,9 +250,8 @@
           }
         } catch (err) {
           console.error("PlantNet Error:", err); 
-          // 💡 에러 발생 원인을 사용자에게 정확히 알려줍니다.
           if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
-            setError("보안 차단: 미리보기 창이나 컴퓨터 파일에서는 작동하지 않습니다. 💡Netlify에 올려서 스마트폰으로 접속해주세요!");
+            setError("보안 차단: 미리보기 창에서는 작동하지 않습니다. Netlify에 올려서 접속해주세요!");
           } else {
             setError("AI 통신이 원활하지 않아요. 구글/네이버로 찾아보고 직접 이름을 적어볼까요?");
             setIsManualMode(true);
@@ -256,12 +274,19 @@
           const finalDesc = result ? result.description : (manualDesc || "직접 관찰하고 기록한 식물입니다.");
 
           const plantsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'plants');
-          await addDoc(plantsRef, {
+          
+          const plantData = {
             name: finalName,
             description: finalDesc,
             imageData: compressedImageUrl,
             createdAt: Date.now()
-          });
+          };
+
+          if (location) {
+            plantData.location = location;
+          }
+
+          await addDoc(plantsRef, plantData);
           setSaveSuccess(true);
         } catch (err) { setError("저장 실패"); } finally { setIsSaving(false); }
       };
@@ -274,7 +299,7 @@
       const resetApp = () => {
         if (selectedImage) URL.revokeObjectURL(selectedImage); 
         setSelectedImage(null); setCompressedImageUrl(null); setResult(null); setError(null); setSaveSuccess(false);
-        setIsManualMode(false); setManualName(''); setManualDesc('');
+        setIsManualMode(false); setManualName(''); setManualDesc(''); setLocation(null);
         if (cameraInputRef.current) cameraInputRef.current.value = "";
         if (albumInputRef.current) albumInputRef.current.value = "";
       };
@@ -285,8 +310,20 @@
         }
       };
 
+      const togglePlantDetail = (id) => {
+        setExpandedPlantId(prevId => prevId === id ? null : id);
+      };
+
       return (
         <div className="min-h-screen bg-[#F4F8F5] text-slate-800 font-sans selection:bg-emerald-200 pb-28">
+          
+          {/* 🌟 카카오톡 등 인앱 브라우저 안내 배너 */}
+          {isInAppBrowser && (
+            <div className="bg-amber-100 text-amber-800 px-4 py-2.5 text-xs font-bold text-center leading-relaxed border-b border-amber-200 animate-in slide-in-from-top-2">
+              💡 카카오톡/네이버 앱에서는 카메라가 안 켜질 수 있습니다.<br/>우측 하단 메뉴(⋮)에서 <span className="text-amber-900 underline">다른 브라우저(크롬/사파리)로 열기</span>를 선택해주세요!
+            </div>
+          )}
+
           <header className="bg-white/80 backdrop-blur-md shadow-sm px-5 py-3 sticky top-0 z-10 border-b border-slate-100">
             <div className="max-w-md mx-auto flex items-center justify-between gap-2">
               <div className="flex items-center">
@@ -347,6 +384,19 @@
                   ) : (
                     <div className="relative rounded-[1.5rem] overflow-hidden shadow-inner">
                       <img src={selectedImage} alt="Selected Plant" className="w-full h-80 object-cover" />
+                      
+                      {!isAnalyzing && (
+                        <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm">
+                          {isLocating ? (
+                            <><i class="ph ph-spinner animate-spin text-white"></i><span className="text-white text-xs font-bold">위치 찾는 중...</span></>
+                          ) : location ? (
+                            <><i class="ph ph-map-pin text-emerald-400"></i><span className="text-white text-xs font-bold">위치 기록 완료</span></>
+                          ) : (
+                            <><i class="ph ph-map-pin-line text-slate-400"></i><span className="text-slate-300 text-xs font-bold">위치 없음</span></>
+                          )}
+                        </div>
+                      )}
+
                       {isAnalyzing && (
                         <div className="absolute inset-0 bg-white/80 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10">
                           <i class="ph ph-spinner animate-spin text-5xl text-emerald-600"></i>
@@ -355,18 +405,31 @@
                       )}
                     </div>
                   )}
+                  {/* 🌟 capture="environment" 속성을 유지하면서 안정성을 높였습니다. */}
                   <input type="file" accept="image/*" capture="environment" onChange={handleImageChange} ref={cameraInputRef} className="hidden" />
                   <input type="file" accept="image/*" onChange={handleImageChange} ref={albumInputRef} className="hidden" />
                 </div>
 
                 {selectedImage && !result && !isAnalyzing && !isManualMode && (
-                  <div className="flex gap-3">
-                    <button onClick={() => setIsManualMode(true)} className="flex-1 py-4 bg-white border border-slate-200 text-slate-700 font-bold rounded-2xl hover:bg-slate-50 shadow-sm flex items-center justify-center gap-1.5 transition-all">
-                      <i class="ph ph-pencil-simple text-xl"></i> 직접 쓰기
+                  <div className="flex flex-col gap-3">
+                    <button onClick={analyzePlant} className="w-full py-4 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 active:bg-emerald-800 shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition-all">
+                      <i class="ph ph-leaf text-xl"></i> 내장 AI로 이름 확인하기
                     </button>
-                    <button onClick={analyzePlant} className="flex-[2] py-4 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 active:bg-emerald-800 shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all">
-                      <i class="ph ph-leaf text-xl"></i> 이름 확인하기
-                    </button>
+                    
+                    <div className="flex gap-3">
+                      <button 
+                        onClick={() => {
+                          setIsManualMode(true);
+                          window.open('https://m.naver.com', '_blank');
+                        }} 
+                        className="flex-[3] py-4 bg-[#03C75A] text-white font-bold rounded-2xl hover:bg-[#02b351] shadow-lg shadow-[#03C75A]/30 flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <i class="ph ph-scan text-xl"></i> 네이버 렌즈 열기
+                      </button>
+                      <button onClick={() => setIsManualMode(true)} className="flex-[2] py-4 bg-white border border-slate-200 text-slate-700 font-bold rounded-2xl hover:bg-slate-50 shadow-sm flex items-center justify-center gap-1.5 transition-all">
+                        <i class="ph ph-pencil-simple text-xl"></i> 직접 쓰기
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -375,12 +438,17 @@
                     <div className="inline-block px-3.5 py-1 bg-amber-100 text-amber-800 text-[11px] font-black rounded-full mb-1 tracking-wide">
                       수동 기록 모드 ✍️
                     </div>
+                    
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-[13px] text-slate-600 font-medium leading-relaxed">
+                      💡 <strong className="text-[#03C75A]">네이버 앱</strong>의 <strong>초록색 동그라미(그린닷)</strong>를 눌러 렌즈로 찾은 뒤, 아래에 식물 이름을 적어주세요!
+                    </div>
+
                     <div className="space-y-3">
                       <div>
                         <label className="text-xs font-bold text-slate-600 pl-1 block mb-1">식물 이름 (필수)</label>
                         <input 
                           type="text" 
-                          placeholder="식물 이름을 적어주세요" 
+                          placeholder="예: 소나무" 
                           value={manualName} 
                           onChange={(e) => setManualName(e.target.value)} 
                           className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-slate-800 outline-none focus:border-emerald-500 focus:bg-white transition-colors" 
@@ -453,31 +521,59 @@
                     <p className="text-slate-500 text-sm mt-1.5 font-medium relative z-10">포이와 함께 카메라로 도감을 채워보세요!</p>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                      {plants.slice(0, visibleCount).map((plant) => (
-                        <div key={plant.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col relative group hover:shadow-md transition-shadow">
-                          <div className="relative h-36">
-                            <img src={plant.imageData} alt={plant.name} className="w-full h-full object-cover bg-slate-100" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                            <button onClick={() => deletePlant(plant.id)} className="absolute top-2 right-2 p-2 bg-black/30 backdrop-blur-md text-white rounded-full hover:bg-red-500 transition-colors opacity-0 group-hover:opacity-100">
-                              <i class="ph ph-trash text-base"></i>
-                            </button>
-                          </div>
-                          <div className="p-4 flex-1 flex flex-col">
-                            <h4 className="font-extrabold text-slate-800 text-sm truncate">{plant.name}</h4>
-                            <p className="text-[11px] font-semibold text-slate-400 mt-1">
-                              {new Date(plant.createdAt).toLocaleDateString()}
+                  <div className="space-y-4">
+                    {plants.map((plant) => (
+                      <div key={plant.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col group transition-all">
+                        <div className="relative h-48 cursor-pointer" onClick={() => togglePlantDetail(plant.id)}>
+                          <img src={plant.imageData} alt={plant.name} className="w-full h-full object-cover bg-slate-100" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
+                          
+                          <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
+                            <h4 className="font-extrabold text-lg flex items-center justify-between">
+                              {plant.name}
+                              <i class={`ph ph-caret-${expandedPlantId === plant.id ? 'up' : 'down'} text-white/70`}></i>
+                            </h4>
+                            <p className="text-xs font-medium text-white/80 mt-1 flex items-center gap-1.5">
+                              <i class="ph ph-calendar-blank"></i> {new Date(plant.createdAt).toLocaleDateString()}
+                              {plant.location && <><span className="mx-1 opacity-50">|</span> <i class="ph ph-map-pin"></i> 위치 기록됨</>}
                             </p>
                           </div>
+
+                          <button onClick={(e) => { e.stopPropagation(); deletePlant(plant.id); }} className="absolute top-3 right-3 p-2 bg-black/40 backdrop-blur-md text-white rounded-full hover:bg-red-500 transition-colors">
+                            <i class="ph ph-trash text-base"></i>
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                    {plants.length > visibleCount && (
-                      <button onClick={() => setVisibleCount(p => p + 10)} className="w-full py-3.5 bg-white border border-emerald-200 text-emerald-700 font-bold rounded-2xl hover:bg-emerald-50 transition-colors shadow-sm">
-                        더 보기 ({visibleCount} / {plants.length})
-                      </button>
-                    )}
+
+                        {expandedPlantId === plant.id && (
+                          <div className="p-5 border-t border-slate-100 bg-slate-50/50 animate-in slide-in-from-top-2">
+                            <p className="text-slate-700 font-medium text-sm leading-relaxed mb-4">
+                              {plant.description}
+                            </p>
+                            
+                            {plant.location ? (
+                              <div className="rounded-2xl overflow-hidden border border-slate-200 h-40 relative shadow-sm">
+                                <iframe
+                                  width="100%"
+                                  height="100%"
+                                  frameBorder="0"
+                                  style={{ border: 0 }}
+                                  src={`https://maps.google.com/maps?q=${plant.location.lat},${plant.location.lng}&z=16&output=embed`}
+                                  allowFullScreen
+                                ></iframe>
+                                <div className="absolute inset-0 bg-transparent pointer-events-none"></div>
+                                <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-600 shadow-sm border border-slate-100">
+                                  발견 위치
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="rounded-2xl bg-slate-100 border border-slate-200 border-dashed h-16 flex items-center justify-center text-slate-400 text-xs font-bold gap-1.5">
+                                <i class="ph ph-map-pin-slash text-base"></i> 위치 정보가 없어요
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
