@@ -9,7 +9,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Phosphor Icons -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
-  <!-- React & ReactDOM (가장 안정적인 CDN으로 교체) -->
+  <!-- React & ReactDOM -->
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <!-- Babel -->
@@ -18,6 +18,9 @@
   <style>
     body { -webkit-tap-highlight-color: transparent; }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+    /* 모달 스크롤바 숨기기용 (선택) */
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-[#F4F8F5]">
@@ -29,7 +32,6 @@
   </div>
 
   <script type="module">
-    // 파이어베이스 모듈 로드
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
     import { getAuth, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
     import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
@@ -67,11 +69,9 @@
       const [selectedImage, setSelectedImage] = useState(null);
       const [compressedImageUrl, setCompressedImageUrl] = useState(null);
       
-      // 위치(GPS) 상태
       const [location, setLocation] = useState(null);
       const [isLocating, setIsLocating] = useState(false);
 
-      // 입력 폼 상태
       const [plantName, setPlantName] = useState('');
       const [plantDesc, setPlantDesc] = useState('');
 
@@ -81,10 +81,12 @@
       const [plants, setPlants] = useState([]);
       const [isSaving, setIsSaving] = useState(false);
       const [saveSuccess, setSaveSuccess] = useState(false);
-      const [expandedPlantId, setExpandedPlantId] = useState(null);
       const [error, setError] = useState(null);
 
-      // 🌟 수정 기능 상태 추가
+      // 🌟 크게 보기(프리젠테이션 모달) 상태 추가
+      const [selectedPlant, setSelectedPlant] = useState(null);
+
+      // 수정 기능 상태
       const [editingPlantId, setEditingPlantId] = useState(null);
       const [editName, setEditName] = useState('');
       const [editDesc, setEditDesc] = useState('');
@@ -97,7 +99,6 @@
       const DUMMY_DOMAIN = "@plant.local"; 
       const [showImageSourceModal, setShowImageSourceModal] = useState(false);
 
-      // 인앱 브라우저 감지 (카카오톡, 네이버 앱 등)
       const isInAppBrowser = /KAKAOTALK|NAVER|Instagram|Line|Daum/i.test(navigator.userAgent);
 
       useEffect(() => {
@@ -144,7 +145,6 @@
         try { await signOut(auth); await signInAnonymously(auth); } catch (err) {}
       };
 
-      // 위치(GPS) 수집 함수
       const fetchLocation = () => {
         if ("geolocation" in navigator) {
           setIsLocating(true);
@@ -154,7 +154,6 @@
               setIsLocating(false);
             },
             (err) => {
-              console.warn("위치 수집 실패:", err.message);
               setLocation(null);
               setIsLocating(false);
             },
@@ -166,7 +165,6 @@
         }
       };
 
-      // 이미지 압축 (도감 저장용량 최적화)
       const compressImage = (file) => {
         return new Promise((resolve) => {
           const reader = new FileReader();
@@ -177,12 +175,12 @@
             img.onload = () => {
               const canvas = document.createElement('canvas');
               let { width, height } = img;
-              if (width > height && width > 600) { height *= 600 / width; width = 600; } 
-              else if (height > 600) { width *= 600 / height; height = 600; }
+              if (width > height && width > 1000) { height *= 1000 / width; width = 1000; } 
+              else if (height > 1000) { width *= 1000 / height; height = 1000; }
               canvas.width = width; canvas.height = height;
               const ctx = canvas.getContext('2d');
               ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+              resolve(canvas.toDataURL('image/jpeg', 0.8)); 
             };
           };
         });
@@ -192,34 +190,24 @@
         const file = e.target.files[0];
         if (file) {
           if (selectedImage) URL.revokeObjectURL(selectedImage);
-          
           setSelectedImage(URL.createObjectURL(file));
-          setSaveSuccess(false);
-          setPlantName(''); 
-          setPlantDesc('');
-          setError(null);
-          setLocation(null);
-          
-          fetchLocation(); // 사진 등록 시 자동으로 위치 탐색 시작
-
+          setSaveSuccess(false); setPlantName(''); setPlantDesc(''); setError(null); setLocation(null);
+          fetchLocation(); 
           const compressedDataUrl = await compressImage(file);
           setCompressedImageUrl(compressedDataUrl);
         }
       };
 
-      // 네이버 렌즈 열기
       const openNaverLens = () => {
         window.open('https://m.naver.com', '_blank');
       };
 
-      // 도감 데이터 파이어베이스에 저장
       const saveToDictionary = async () => {
         if (!user) {
           setError("도감에 저장하려면 먼저 우측 상단의 [로그인]을 진행해주세요!");
           setShowLoginModal(true);
           return;
         }
-        
         if (!plantName.trim()) {
           setError("식물 이름을 꼭 적어주세요!");
           return;
@@ -237,10 +225,7 @@
             imageData: compressedImageUrl,
             createdAt: Date.now()
           };
-
-          if (location) {
-            plantData.location = location;
-          }
+          if (location) plantData.location = location;
 
           await addDoc(plantsRef, plantData);
           setSaveSuccess(true);
@@ -253,31 +238,27 @@
 
       const deletePlant = async (id) => {
         if (!user) return;
-        try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'plants', id)); } catch (err) {}
+        try { 
+          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'plants', id));
+          if (selectedPlant && selectedPlant.id === id) setSelectedPlant(null);
+        } catch (err) {}
       };
 
-      // 🌟 도감 수정 시작
       const startEditPlant = (plant, e) => {
-        e.stopPropagation(); // 카드 클릭 이벤트와 겹치지 않게 방지
+        e.stopPropagation(); 
         setEditingPlantId(plant.id);
         setEditName(plant.name);
         setEditDesc(plant.description || '');
-        setExpandedPlantId(plant.id); // 내용도 자동으로 펼쳐줌
       };
 
-      // 🌟 도감 수정 취소
       const cancelEdit = () => {
         setEditingPlantId(null);
         setEditName('');
         setEditDesc('');
       };
 
-      // 🌟 수정한 정보 서버에 저장
       const saveEditPlant = async (id) => {
-        if (!user || !editName.trim()) {
-          setError("식물 이름을 입력해야 수정할 수 있습니다.");
-          return;
-        }
+        if (!user || !editName.trim()) return;
         setIsUpdating(true);
         try {
           const plantDoc = doc(db, 'artifacts', appId, 'users', user.uid, 'plants', id);
@@ -286,9 +267,8 @@
             description: editDesc.trim()
           });
           setEditingPlantId(null);
-          setError(null);
         } catch (err) {
-          setError("수정에 실패했습니다. 네트워크를 확인해주세요.");
+          setError("수정에 실패했습니다.");
         } finally {
           setIsUpdating(false);
         }
@@ -298,39 +278,23 @@
         if (selectedImage) URL.revokeObjectURL(selectedImage); 
         setSelectedImage(null); setCompressedImageUrl(null); setSaveSuccess(false);
         setPlantName(''); setPlantDesc(''); setError(null); setLocation(null); setIsLocating(false);
-        cancelEdit(); // 리셋 시 수정 상태도 초기화
+        cancelEdit(); 
+        setSelectedPlant(null); // 모달 닫기
         if (cameraInputRef.current) cameraInputRef.current.value = "";
         if (albumInputRef.current) albumInputRef.current.value = "";
-      };
-
-      const handleModalBackgroundClick = (e) => {
-        if (e.target === e.currentTarget) {
-          setShowImageSourceModal(false);
-        }
-      };
-
-      const togglePlantDetail = (id) => {
-        setExpandedPlantId(prevId => {
-          if (prevId === id) {
-            cancelEdit(); // 🌟 아코디언(내용)을 닫을 때 작성 중이던 수정 데이터도 안전하게 초기화
-            return null;
-          }
-          return id;
-        });
       };
 
       return (
         <div className="min-h-screen bg-[#F4F8F5] text-slate-800 font-sans selection:bg-emerald-200 pb-28">
           
           {isInAppBrowser && (
-            <div className="bg-amber-100 text-amber-800 px-4 py-2.5 text-xs font-bold text-center leading-relaxed border-b border-amber-200 animate-in slide-in-from-top-2">
+            <div className="bg-amber-100 text-amber-800 px-4 py-2.5 text-xs font-bold text-center leading-relaxed border-b border-amber-200 animate-in slide-in-from-top-2 z-50 relative">
               💡 카카오톡 등에서는 카메라가 원활하지 않을 수 있습니다.<br/>메뉴(⋮)에서 <span className="text-amber-900 underline">다른 브라우저로 열기</span>를 선택해주세요!
             </div>
           )}
 
-          <header className="bg-white/80 backdrop-blur-md shadow-sm px-5 py-3 sticky top-0 z-10 border-b border-slate-100">
-            {/* PC 환경 대응 넓이 조정 (max-w-md -> md:max-w-3xl lg:max-w-5xl) */}
-            <div className="max-w-md md:max-w-3xl lg:max-w-5xl mx-auto flex items-center justify-between gap-2">
+          <header className="bg-white/80 backdrop-blur-md shadow-sm px-5 py-3 sticky top-0 z-40 border-b border-slate-100">
+            <div className="max-w-md md:max-w-3xl lg:max-w-6xl mx-auto flex items-center justify-between gap-2">
               <div className="flex items-center">
                 <img src="국립장성숲체원-_국문좌우_이미지형 (1).png" alt="국립장성숲체원 로고" className="h-10 object-contain drop-shadow-sm" />
               </div>
@@ -352,16 +316,14 @@
             </div>
           </header>
 
-          {/* PC 환경 대응 넓이 조정 */}
-          <main className="max-w-md md:max-w-3xl lg:max-w-5xl mx-auto p-5 mt-2">
+          <main className="max-w-md md:max-w-3xl lg:max-w-6xl mx-auto p-5 mt-2">
             {currentTab === 'camera' && (
-              // 카메라 탭은 PC 화면에서도 너무 퍼지지 않게 폭을 고정
               <div className="max-w-md mx-auto w-full flex flex-col gap-6 animate-in fade-in duration-500">
                 {!selectedImage && (
                   <div className="text-center space-y-4 py-6 relative">
                     <div className="relative inline-block">
                       <div className="absolute inset-0 bg-emerald-300 blur-3xl opacity-20 rounded-full transform scale-150"></div>
-                      <img src="01.관찰포이_봄.png" alt="관찰하는 포이" className="w-40 h-40 mx-auto relative z-10 drop-shadow-xl animate-bounce" style={{ animationDuration: '3s' }} />
+                      <img src="01.관찰포이_봄.png" alt="관찰포이" className="w-40 h-40 mx-auto relative z-10 drop-shadow-xl animate-bounce" style={{ animationDuration: '3s' }} />
                     </div>
                     <div>
                       <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">식물을 발견했나요?</h2>
@@ -390,9 +352,7 @@
                     </div>
                   ) : (
                     <div className="relative rounded-[1.5rem] overflow-hidden shadow-inner">
-                      <img src={selectedImage} alt="Selected Plant" className="w-full h-80 object-cover" />
-                      
-                      {/* 위치 정보 상태 표시 */}
+                      <img src={selectedImage} alt="Selected" className="w-full h-80 object-cover" />
                       <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm">
                         {isLocating ? (
                           <><i className="ph ph-spinner animate-spin text-white"></i><span className="text-white text-xs font-bold">위치 찾는 중...</span></>
@@ -410,8 +370,6 @@
 
                 {selectedImage && (
                   <div className="animate-in slide-in-from-bottom-4 space-y-6">
-                    
-                    {/* 네이버 렌즈 안내 */}
                     <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200 space-y-3 shadow-inner">
                       <div className="flex items-center gap-2 text-slate-800 font-black text-lg">
                         <i className="ph ph-scan text-2xl text-[#03C75A]"></i> 이름이 궁금하다면?
@@ -419,39 +377,23 @@
                       <p className="text-sm text-slate-600 font-medium leading-relaxed break-keep">
                         아래 버튼을 눌러 네이버를 열고, <strong>그린닷</strong>의 <strong>렌즈</strong>로 사진을 검색해보세요!
                       </p>
-                      <button 
-                        onClick={openNaverLens} 
-                        className="w-full py-4 bg-[#03C75A] text-white font-black rounded-xl hover:bg-[#02b351] active:bg-[#029a46] shadow-md shadow-[#03C75A]/20 flex items-center justify-center gap-2 transition-all mt-1"
-                      >
+                      <button onClick={openNaverLens} className="w-full py-4 bg-[#03C75A] text-white font-black rounded-xl hover:bg-[#02b351] active:bg-[#029a46] shadow-md shadow-[#03C75A]/20 flex items-center justify-center gap-2 transition-all mt-1">
                         네이버 렌즈로 이름 찾기
                       </button>
                     </div>
 
-                    {/* 기록 박스 */}
                     <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-emerald-200 space-y-4 relative">
                       <div className="inline-block px-3.5 py-1 bg-emerald-100 text-emerald-800 text-[11px] font-black rounded-full mb-1 tracking-wide">
                         기록하기 ✍️
                       </div>
-
                       <div className="space-y-4">
                         <div>
                           <label className="text-xs font-bold text-slate-600 pl-1 block mb-1">식물 이름 (필수)</label>
-                          <input 
-                            type="text" 
-                            placeholder="찾아낸 식물 이름을 적어주세요" 
-                            value={plantName} 
-                            onChange={(e) => { setPlantName(e.target.value); setError(null); }} 
-                            className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 font-bold text-slate-800 outline-none focus:border-emerald-500 focus:bg-white transition-colors" 
-                          />
+                          <input type="text" placeholder="찾아낸 식물 이름을 적어주세요" value={plantName} onChange={(e) => { setPlantName(e.target.value); setError(null); }} className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 font-bold text-slate-800 outline-none focus:border-emerald-500 focus:bg-white transition-colors" />
                         </div>
                         <div>
                           <label className="text-xs font-bold text-slate-600 pl-1 block mb-1">특징 메모 (선택)</label>
-                          <textarea 
-                            placeholder="이 식물의 특징이나 느낀 점을 적어보세요" 
-                            value={plantDesc} 
-                            onChange={(e) => setPlantDesc(e.target.value)} 
-                            className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-700 outline-none focus:border-emerald-500 focus:bg-white transition-colors resize-none h-24" 
-                          />
+                          <textarea placeholder="이 식물의 특징이나 느낀 점을 적어보세요" value={plantDesc} onChange={(e) => setPlantDesc(e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-700 outline-none focus:border-emerald-500 focus:bg-white transition-colors resize-none h-24" />
                         </div>
                       </div>
                     </div>
@@ -460,17 +402,12 @@
                       <button onClick={resetApp} className="flex-1 py-4 bg-white border border-slate-200 text-slate-700 font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-50 shadow-sm transition-all">
                         <i className="ph ph-arrows-clockwise text-xl"></i> 다시
                       </button>
-                      
                       {saveSuccess ? (
                         <button disabled className="flex-[2] py-4 bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed">
                           <i className="ph ph-check-circle text-xl"></i> 저장 완료!
                         </button>
                       ) : (
-                        <button 
-                          onClick={saveToDictionary} 
-                          disabled={isSaving || !plantName.trim()} 
-                          className="flex-[2] py-4 bg-slate-800 text-white font-bold rounded-2xl hover:bg-slate-900 active:bg-black shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
-                        >
+                        <button onClick={saveToDictionary} disabled={isSaving || !plantName.trim()} className="flex-[2] py-4 bg-slate-800 text-white font-bold rounded-2xl hover:bg-slate-900 active:bg-black shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-all">
                           {isSaving ? <i className="ph ph-spinner animate-spin text-xl"></i> : <i className="ph ph-floppy-disk text-xl"></i>}
                           내 도감에 저장
                         </button>
@@ -500,91 +437,43 @@
                     <p className="text-slate-500 text-sm mt-1.5 font-medium relative z-10">카메라로 식물을 찍고 도감을 채워보세요!</p>
                   </div>
                 ) : (
-                  // PC 화면에서는 다단(Grid) 구조로 확장되어 멋진 갤러리로 보임
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
                     {plants.map((plant) => (
-                      <div key={plant.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col group transition-all">
-                        <div className="relative h-48 md:h-56 cursor-pointer" onClick={() => togglePlantDetail(plant.id)}>
-                          <img src={plant.imageData} alt={plant.name} className="w-full h-full object-cover bg-slate-100" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
-                          
-                          <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
-                            <h4 className="font-extrabold text-lg flex items-center justify-between">
-                              {plant.name}
-                              <i className={`ph ph-caret-${expandedPlantId === plant.id ? 'up' : 'down'} text-white/70`}></i>
-                            </h4>
-                            <p className="text-xs font-medium text-white/80 mt-1 flex items-center gap-1.5">
-                              <i className="ph ph-calendar-blank"></i> {new Date(plant.createdAt).toLocaleDateString()}
-                              {plant.location && <><span className="mx-1 opacity-50">|</span> <i className="ph ph-map-pin"></i> 위치 기록됨</>}
-                            </p>
+                      <div key={plant.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col group transition-all h-48 md:h-64 relative">
+                        {editingPlantId === plant.id ? (
+                          // 카드 내부에서 수정 폼 렌더링
+                          <div className="p-4 flex flex-col h-full bg-emerald-50/50 absolute inset-0 z-10 animate-in fade-in">
+                            <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white font-bold text-slate-800 outline-none focus:border-emerald-500 mb-2 text-sm" placeholder="식물 이름"/>
+                            <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} className="w-full flex-1 px-3 py-2 rounded-xl border border-emerald-200 bg-white font-medium text-slate-700 outline-none focus:border-emerald-500 resize-none text-xs" placeholder="특징 메모"/>
+                            <div className="flex gap-2 mt-2">
+                              <button onClick={cancelEdit} className="flex-1 py-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl text-xs">취소</button>
+                              <button onClick={() => saveEditPlant(plant.id)} disabled={isUpdating || !editName.trim()} className="flex-1 py-2 bg-emerald-600 text-white font-bold rounded-xl disabled:opacity-50 text-xs">{isUpdating ? '저장중' : '저장'}</button>
+                            </div>
                           </div>
+                        ) : (
+                          // 일반 도감 카드 상태 (클릭 시 확대 모달 열림)
+                          <div className="relative h-full w-full cursor-pointer overflow-hidden" onClick={() => setSelectedPlant(plant)}>
+                            <img src={plant.imageData} alt={plant.name} className="w-full h-full object-cover bg-slate-100 group-hover:scale-105 transition-transform duration-500" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent"></div>
+                            
+                            <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
+                              <h4 className="font-extrabold text-lg flex items-center justify-between truncate pr-2">
+                                {plant.name}
+                              </h4>
+                              <p className="text-[11px] md:text-xs font-medium text-white/80 mt-1 flex items-center gap-1.5 truncate">
+                                <i className="ph ph-calendar-blank"></i> {new Date(plant.createdAt).toLocaleDateString()}
+                              </p>
+                            </div>
 
-                          {/* 수정 및 삭제 버튼 영역 */}
-                          <div className="absolute top-3 right-3 flex gap-2">
-                            <button onClick={(e) => startEditPlant(plant, e)} className="p-2 bg-black/40 backdrop-blur-md text-white rounded-full hover:bg-emerald-500 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100 shadow-sm">
-                              <i className="ph ph-pencil-simple text-base"></i>
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); deletePlant(plant.id); }} className="p-2 bg-black/40 backdrop-blur-md text-white rounded-full hover:bg-red-500 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100 shadow-sm">
-                              <i className="ph ph-trash text-base"></i>
-                            </button>
-                          </div>
-                        </div>
-
-                        {expandedPlantId === plant.id && (
-                          <div className="p-5 border-t border-slate-100 bg-slate-50/50 animate-in slide-in-from-top-2 flex-1 flex flex-col">
-                            {editingPlantId === plant.id ? (
-                              <div className="space-y-3">
-                                <input 
-                                  type="text" 
-                                  value={editName} 
-                                  onChange={(e) => setEditName(e.target.value)} 
-                                  className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white font-bold text-slate-800 outline-none focus:border-emerald-500 transition-colors"
-                                  placeholder="식물 이름"
-                                />
-                                <textarea 
-                                  value={editDesc} 
-                                  onChange={(e) => setEditDesc(e.target.value)} 
-                                  className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white font-medium text-slate-700 outline-none focus:border-emerald-500 transition-colors resize-none h-20"
-                                  placeholder="특징 메모"
-                                />
-                                <div className="flex gap-2 pt-1">
-                                  <button onClick={cancelEdit} className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors text-sm">
-                                    취소
-                                  </button>
-                                  <button onClick={() => saveEditPlant(plant.id)} disabled={isUpdating || !editName.trim()} className="flex-1 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 text-sm flex items-center justify-center gap-1.5 shadow-sm">
-                                    {isUpdating ? <i className="ph ph-spinner animate-spin"></i> : <i className="ph ph-check"></i>}
-                                    저장
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <p className="text-slate-700 font-medium text-sm leading-relaxed mb-4 whitespace-pre-wrap flex-1">
-                                  {plant.description}
-                                </p>
-                                
-                                {/* PC 모니터 대응: 지도 크기 확장 */}
-                                {plant.location ? (
-                                  <div className="rounded-2xl overflow-hidden border border-slate-200 h-40 md:h-48 relative shadow-sm mt-auto">
-                                    <iframe
-                                      width="100%"
-                                      height="100%"
-                                      frameBorder="0"
-                                      src={`https://maps.google.com/maps?q=${plant.location.lat},${plant.location.lng}&z=16&output=embed`}
-                                      allowFullScreen
-                                    ></iframe>
-                                    <div className="absolute inset-0 bg-transparent pointer-events-none"></div>
-                                    <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-600 shadow-sm border border-slate-100 flex items-center gap-1">
-                                      <i className="ph ph-map-pin-fill text-emerald-500"></i> 발견 위치
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="rounded-2xl bg-slate-100 border border-slate-200 border-dashed h-16 flex items-center justify-center text-slate-400 text-xs font-bold gap-1.5 mt-auto">
-                                    <i className="ph ph-map-pin-slash text-base"></i> 위치 정보가 없어요
-                                  </div>
-                                )}
-                              </>
-                            )}
+                            {/* 우측 상단 수정/삭제 버튼 */}
+                            <div className="absolute top-3 right-3 flex gap-2">
+                              <button onClick={(e) => startEditPlant(plant, e)} className="p-2 bg-black/40 backdrop-blur-md text-white rounded-full hover:bg-emerald-500 transition-colors shadow-sm z-10">
+                                <i className="ph ph-pencil-simple text-sm"></i>
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); deletePlant(plant.id); }} className="p-2 bg-black/40 backdrop-blur-md text-white rounded-full hover:bg-red-500 transition-colors shadow-sm z-10">
+                                <i className="ph ph-trash text-sm"></i>
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -595,9 +484,9 @@
             )}
           </main>
 
-          <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 pb-safe z-20">
-            {/* PC 환경 대응 넓이 조정 */}
-            <div className="max-w-md md:max-w-3xl lg:max-w-5xl mx-auto flex">
+          {/* 하단 네비게이션 바 */}
+          <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 pb-safe z-30">
+            <div className="max-w-md md:max-w-3xl lg:max-w-6xl mx-auto flex">
               <button onClick={() => setCurrentTab('camera')} className={`flex-1 py-4 flex flex-col items-center gap-1.5 transition-colors relative ${currentTab === 'camera' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}>
                 {currentTab === 'camera' && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-1 bg-emerald-500 rounded-b-full"></div>}
                 <i className={`ph ph-camera text-2xl ${currentTab === 'camera' ? 'fill-emerald-50' : ''}`}></i>
@@ -611,11 +500,9 @@
             </div>
           </nav>
 
+          {/* 🌟 1. 사진 선택 방식 모달 */}
           {showImageSourceModal && (
-            <div 
-              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-5"
-              onClick={handleModalBackgroundClick}
-            >
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-5" onClick={handleModalBackgroundClick}>
               <div className="bg-white rounded-t-[2rem] sm:rounded-[2.5rem] w-full max-w-sm p-6 space-y-4 shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200 pb-safe">
                 <div className="text-center mb-4">
                   <h3 className="text-xl font-black text-slate-800">사진 가져오기</h3>
@@ -632,9 +519,10 @@
             </div>
           )}
 
+          {/* 🌟 2. 로그인 모달 */}
           {showLoginModal && (
             <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-5">
-              <div className="bg-white rounded-[2.5rem] w-full max-w-sm p-7 space-y-6 shadow-2xl">
+              <div className="bg-white rounded-[2.5rem] w-full max-w-sm p-7 space-y-6 shadow-2xl animate-in zoom-in-95">
                 <div className="text-center">
                   <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
                     <i className="ph ph-leaf text-3xl"></i>
@@ -663,11 +551,78 @@
               </div>
             </div>
           )}
+
+          {/* 🌟 3. 식물 자세히 보기 프리젠테이션 모달 (핵심 추가 영역) */}
+          {selectedPlant && (
+            <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 md:p-6 lg:p-10" onClick={() => setSelectedPlant(null)}>
+              <div 
+                className="bg-white rounded-[2rem] w-full max-w-lg md:max-w-4xl lg:max-w-5xl h-full max-h-[85vh] md:max-h-[80vh] overflow-hidden flex flex-col md:flex-row shadow-2xl animate-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()} // 모달 배경 클릭시에만 닫히도록 방지
+              >
+                {/* 왼쪽 (모바일은 위쪽): 크게 확대된 사진 */}
+                <div className="w-full md:w-1/2 h-[40%] md:h-full bg-black relative flex items-center justify-center flex-shrink-0">
+                  <img 
+                    src={selectedPlant.imageData} 
+                    alt={selectedPlant.name} 
+                    className="w-full h-full object-contain" 
+                  />
+                  {/* 모바일 환경용 닫기 버튼 */}
+                  <button onClick={() => setSelectedPlant(null)} className="absolute top-4 right-4 md:hidden w-10 h-10 bg-black/50 backdrop-blur text-white rounded-full flex items-center justify-center shadow-lg">
+                    <i className="ph ph-x text-xl"></i>
+                  </button>
+                </div>
+
+                {/* 오른쪽 (모바일은 아래쪽): 상세 설명 및 지도 */}
+                <div className="w-full md:w-1/2 p-6 md:p-10 flex flex-col bg-white overflow-y-auto hide-scrollbar">
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <div className="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-black rounded-full mb-3">
+                        나의 도감 기록
+                      </div>
+                      <h3 className="text-3xl md:text-4xl lg:text-5xl font-black text-slate-800 break-keep leading-tight">
+                        {selectedPlant.name}
+                      </h3>
+                      <p className="text-sm font-semibold text-slate-500 mt-3 flex items-center gap-1.5">
+                        <i className="ph ph-calendar-blank text-emerald-600 text-lg"></i> {new Date(selectedPlant.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    {/* PC 환경용 닫기 버튼 */}
+                    <button onClick={() => setSelectedPlant(null)} className="hidden md:flex w-12 h-12 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full items-center justify-center transition-colors">
+                      <i className="ph ph-x text-2xl"></i>
+                    </button>
+                  </div>
+
+                  <div className="text-slate-700 font-medium text-base md:text-lg leading-relaxed whitespace-pre-wrap mb-8 flex-1">
+                    {selectedPlant.description}
+                  </div>
+
+                  {/* 지도 영역 (프리젠테이션 모드에 맞게 큼직하게 배치) */}
+                  {selectedPlant.location && (
+                    <div className="mt-auto pt-6 border-t border-slate-100">
+                      <div className="flex items-center gap-2 text-slate-800 font-bold mb-3">
+                        <i className="ph ph-map-pin-fill text-emerald-500 text-xl"></i> 발견 위치
+                      </div>
+                      <div className="rounded-2xl overflow-hidden border border-slate-200 h-48 md:h-64 relative shadow-sm">
+                        <iframe
+                          width="100%"
+                          height="100%"
+                          frameBorder="0"
+                          style={{ border: 0 }}
+                          src={`https://maps.google.com/maps?q=${selectedPlant.location.lat},${selectedPlant.location.lng}&z=16&output=embed`}
+                          allowFullScreen
+                        ></iframe>
+                        <div className="absolute inset-0 bg-transparent pointer-events-none"></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
 
-    // 파이어베이스 준비 확인
     const checkFirebaseAndStart = () => {
       if (window.firebaseAuth && window.firebaseMethods) {
         const root = ReactDOM.createRoot(document.getElementById('root'));
