@@ -284,6 +284,13 @@
         if (albumInputRef.current) albumInputRef.current.value = "";
       };
 
+      // 💡 누락되었던 모달 배경 클릭 감지 함수 복구
+      const handleModalBackgroundClick = (e) => {
+        if (e.target === e.currentTarget) {
+          setShowImageSourceModal(false);
+        }
+      };
+
       return (
         <div className="min-h-screen bg-[#F4F8F5] text-slate-800 font-sans selection:bg-emerald-200 pb-28">
           
